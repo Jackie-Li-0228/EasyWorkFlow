@@ -1,0 +1,8 @@
+__pycache__/
+mini_mode_config.json
+task_tree.json
+build/
+dist/
+.vscode/
+ui.spec
+setup.py

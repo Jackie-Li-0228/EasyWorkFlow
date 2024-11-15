@@ -27,9 +27,19 @@ class Task:
 class TaskTree:
     def __init__(self, filename="task_tree.json"):
         self.filename = filename
-        self.root = Task("Root")  # 根节点
+        self.root = self.create_root_node()
         self.current_task = self.root
         self.load_from_file()
+
+    def create_root_node(self):
+        """创建并返回一个新的根节点"""
+        return Task(name="Root", id=str(uuid.uuid4()))
+
+    def reset_to_root(self):
+        """重置任务树到只有根节点的状态"""
+        self.root = self.create_root_node()
+        self.current_task = self.root
+        self.save_to_file()
 
     def add_task(self, name):
         new_task = Task(name, parent_id=self.current_task.id)
@@ -71,7 +81,7 @@ class TaskTree:
                 
                 
     def save_to_file(self, filename=None):
-        """将任务树保存到 JSON 文件，并记录当前专注任务的 id���"""
+        """将任务树保存到 JSON 文件，并记录当前专注任务的 id"""
         if filename == None:
             filename = self.filename
         with open(filename, 'w') as file:
@@ -98,7 +108,7 @@ class TaskTree:
             choice = ""  # 处理无法输入的情况
 
         if choice == '1':
-            self.root = Task("Root")  # 重新初始化根节点
+            self.root = self.create_root_node()
             self.current_task = self.root
             self.save_to_file()
             print(f"已重新创建 {self.filename} 文件。")
@@ -106,7 +116,7 @@ class TaskTree:
             print("请手动检查文件内容，并确保格式正确。")
         else:
             print("未选择有效选项，默认重新创建文件。")
-            self.root = Task("Root")  # 默认重新初始化
+            self.root = self.create_root_node()
             self.current_task = self.root
             self.save_to_file()
 
@@ -159,7 +169,6 @@ class TaskTree:
 
 if __name__ == "__main__":
     task_tree = TaskTree()
-    task_tree.save_to_file(filename="task_tree_start.json")
     task_tree.rename_task("subtask 1.1 renamed")
     task_tree.complete_task()
 

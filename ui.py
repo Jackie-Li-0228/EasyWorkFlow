@@ -4,6 +4,11 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QVBoxLayout, QPu
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, Qt
 from task_tree import TaskTree
+import json
+import os
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QColor, QFont, QPixmap
+from PyQt5.QtWidgets import QGraphicsDropShadowEffect, QGraphicsOpacityEffect
 
 class TaskManagerUI(QMainWindow):
     update_ui_signal = pyqtSignal()  # 用于更新UI显示
@@ -48,9 +53,14 @@ class TaskManagerUI(QMainWindow):
         mini_mode_btn = QPushButton("进入MINI模式", self)
         mini_mode_btn.clicked.connect(self.enter_mini_mode)
         
+        # 新增的按钮
+        new_workflow_btn = QPushButton("创建一个新的工作流", self)
+        new_workflow_btn.clicked.connect(self.create_new_workflow)
+        
         layout.addWidget(add_task_btn)
         layout.addWidget(complete_task_btn)
         layout.addWidget(mini_mode_btn)
+        layout.addWidget(new_workflow_btn)  # 添加新按钮到布局
         
         self.setCentralWidget(central_widget)
 
@@ -89,7 +99,7 @@ class TaskManagerUI(QMainWindow):
     def complete_task(self):
         """完成任务并检查是否根节点"""
         if self.task_tree.current_task == self.task_tree.root:
-            QMessageBox.warning(self, "警告", "根节点不可完成。")
+            print("警告: 根节点不可完成。")
             return
         self.task_tree.complete_task()
         print("任务已完成。")
@@ -107,25 +117,64 @@ class TaskManagerUI(QMainWindow):
         if hasattr(self, 'mini_mode_window') and self.mini_mode_window.isVisible():
             self.mini_mode_window.update_task_name()
 
+    def create_new_workflow(self):
+        """创建一个新的工作流"""
+        self.task_tree.reset_to_root()  # 假设有一个方法可以重置 task_tree
+        print("新的工作流已创建。")
+        self.update_ui_signal.emit()  # 触发 UI 更新
+        self.task_changed_signal.emit()  # 通知任务切换
+        self.task_tree.save_to_file()
+
 class MiniModeWindow(QMainWindow):
+    CONFIG_FILE = "mini_mode_config.json"
+
     def __init__(self, task_manager_ui):
         super().__init__()
         self.task_manager_ui = task_manager_ui
+        self.config = self.load_config()
         self.initUI()
-        self.offset = None  # 用于存储鼠标点击位置的偏移量
+
+        # 连接信号
+        self.task_manager_ui.update_ui_signal.connect(self.update_task_name)
+        self.task_manager_ui.task_changed_signal.connect(self.update_task_name)
 
     def initUI(self):
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, False)  # 允许背景颜色设置
-        self.setGeometry(100, 100, 200, 50)
+        # 设置窗口标志
+        flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+        if self.config["window"].get("resizable", False):
+            flags |= Qt.Window
+        self.setWindowFlags(flags)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+        # 设置窗口几何信息
+        position = self.config.get("position", {})
+        self.setGeometry(
+            position.get("x", 100),
+            position.get("y", 100),
+            position.get("width", 200),
+            position.get("height", 100)
+        )
+
+        # 设置样式
+        self.setStyleSheet(f"""
+            background-color: {self.config["window"]["background_color"]};
+            border-radius: {self.config["window"]["border_radius"]}px;
+        """)
+
+        # 设置阴影效果
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(15)
+        shadow.setColor(QColor(0, 0, 0, 160))
+        shadow.setOffset(0, 0)
 
         self.label = QLabel(self)
         self.label.setAlignment(Qt.AlignCenter)
+        self.label.setFont(QFont(self.config["font"]["family"], self.config["font"]["size"]))
         self.update_task_name()
 
         self.input_field = QLineEdit(self)
         self.input_field.setAlignment(Qt.AlignCenter)
-        self.input_field.hide()  # 初始隐藏输入框
+        self.input_field.hide()
         self.input_field.returnPressed.connect(self.rename_task)
 
         layout = QVBoxLayout()
@@ -134,15 +183,25 @@ class MiniModeWindow(QMainWindow):
 
         central_widget = QWidget(self)
         central_widget.setLayout(layout)
-        central_widget.setStyleSheet("background-color: white;")  # 设置背景颜色为白色
+        central_widget.setGraphicsEffect(shadow)
         self.setCentralWidget(central_widget)
 
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
 
     def update_task_name(self):
-        """更新悬浮条上的任务名称"""
-        self.label.setText(self.task_manager_ui.task_tree.current_task.name)
+        """更新任务名称并调整窗口宽度"""
+        task_name = self.task_manager_ui.task_tree.current_task.name
+        self.label.setText(task_name)
+        self.adjust_window_width()
+
+    def adjust_window_width(self):
+        """根据标签内容调整窗口宽度"""
+        # 获取文本的宽度
+        text_width = self.label.fontMetrics().boundingRect(self.label.text()).width()
+        # 设置窗口宽度，增加一些边距
+        new_width = text_width + 40  # 40 是一个经验值，可以根据需要调整
+        self.setFixedWidth(new_width)
 
     def show_context_menu(self, pos):
         context_menu = QMenu(self)
@@ -165,30 +224,19 @@ class MiniModeWindow(QMainWindow):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.offset = event.pos()  # 记录鼠标点击位置
+            self.offset = event.pos()
 
     def mouseMoveEvent(self, event):
         if self.offset is not None:
-            self.move(self.pos() + event.pos() - self.offset)  # 移动窗口
+            self.move(self.pos() + event.pos() - self.offset)
 
     def mouseReleaseEvent(self, event):
-        self.offset = None  # 重置偏移量
+        self.offset = None
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.task_manager_ui.show()
             self.close()
-
-    def rename_task(self):
-        """重命名任务并更新显示"""
-        new_name = self.input_field.text().strip()
-        if new_name:
-            self.task_manager_ui.task_tree.rename_task(new_name)
-            self.task_manager_ui.update_ui_signal.emit()  # 更新 UI
-            self.task_manager_ui.task_changed_signal.emit()  # 通知任务切换
-        self.input_field.hide()
-        self.label.show()
-        self.update_task_name()
 
     def enter_rename_mode(self):
         """进入重命名模式"""
@@ -197,9 +245,132 @@ class MiniModeWindow(QMainWindow):
         self.input_field.show()
         self.input_field.setFocus()
 
+    def rename_task(self):
+        """重命名任务并调整窗口宽度"""
+        new_name = self.input_field.text().strip()
+        if new_name:
+            self.task_manager_ui.task_tree.rename_task(new_name)
+            self.task_manager_ui.update_ui_signal.emit()
+            self.task_manager_ui.task_changed_signal.emit()
+        self.input_field.hide()
+        self.label.show()
+        self.update_task_name()
+
+    def load_config(self):
+        default_config = {
+            "window": {
+                "background_color": "#FFFFFF",
+                "background_image": "",
+                "border_radius": 15,
+                "resizable": True
+            },
+            "font": {
+                "family": "Arial",
+                "size": 12
+            },
+            "animations": {
+                "task_created": "",
+                "task_completed": ""
+            },
+            "position": {
+                "x": 100,
+                "y": 100,
+                "width": 200,
+                "height": 50
+            }
+        }
+
+        if os.path.exists(self.CONFIG_FILE):
+            with open(self.CONFIG_FILE, 'r') as file:
+                try:
+                    config = json.load(file)
+                    # 合并默认配置和文件配置
+                    for key, value in default_config.items():
+                        if key not in config:
+                            config[key] = value
+                        elif isinstance(value, dict):
+                            for sub_key, sub_value in value.items():
+                                if sub_key not in config[key]:
+                                    config[key][sub_key] = sub_value
+                    return config
+                except json.JSONDecodeError:
+                    print("JSON 文件格式错误，使用默认配置。")
+        else:
+            print("配置文件不存在，使用默认配置。")
+
+        return default_config
+
+    def save_config(self):
+        # 更新配置中的位置信息
+        self.config["position"] = {
+            "x": self.x(),
+            "y": self.y(),
+            "width": self.width(),
+            "height": self.height()
+        }
+        with open(self.CONFIG_FILE, 'w') as file:
+            json.dump(self.config, file, indent=4)
+
+    def moveEvent(self, event):
+        """在窗口移动时检查并调整位置"""
+        self.ensure_not_covered_by_taskbar()
+        self.save_config()
+        super().moveEvent(event)
+
+    def ensure_not_covered_by_taskbar(self):
+        """确保窗口不被任务栏遮挡"""
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        window_geometry = self.geometry()
+
+        # 检查并调整窗口位置
+        new_x = window_geometry.x()
+        new_y = window_geometry.y()
+
+        if window_geometry.bottom() > screen_geometry.bottom():
+            new_y = screen_geometry.bottom() - window_geometry.height()
+        if window_geometry.right() > screen_geometry.right():
+            new_x = screen_geometry.right() - window_geometry.width()
+        if window_geometry.top() < screen_geometry.top():
+            new_y = screen_geometry.top()
+        if window_geometry.left() < screen_geometry.left():
+            new_x = screen_geometry.left()
+
+        if new_x != window_geometry.x() or new_y != window_geometry.y():
+            self.move(new_x, new_y)
+
+    def resizeEvent(self, event):
+        """在窗口大小调整时保存配置"""
+        self.save_config()
+        super().resizeEvent(event)
+
+    def closeEvent(self, event):
+        self.save_config()
+        super().closeEvent(event)
+
+    def play_animation(self, animation_type):
+        animation_path = self.config["animations"].get(animation_type, "")
+        if animation_path and os.path.exists(animation_path):
+            # 这里可以实现播放动画的逻辑，例如使用 QLabel 显示 GIF
+            pass
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.adjust_position()
+
+    def adjust_position(self):
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        window_geometry = self.geometry()
+
+        # 检查窗口是否超出屏幕可用区域
+        if window_geometry.bottom() > screen_geometry.bottom():
+            self.move(window_geometry.x(), screen_geometry.bottom() - window_geometry.height())
+        if window_geometry.right() > screen_geometry.right():
+            self.move(screen_geometry.right() - window_geometry.width(), window_geometry.y())
+
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     task_tree = TaskTree()
-    ui = TaskManagerUI(task_tree)
-    ui.show()
+    # 直接启动 MiniModeWindow
+    mini_mode_window = MiniModeWindow(TaskManagerUI(task_tree))
+    mini_mode_window.show()
     sys.exit(app.exec_())
