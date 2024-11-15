@@ -2,12 +2,12 @@ import sys
 import keyboard  # Import the keyboard library for global hotkeys
 from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QVBoxLayout, QPushButton, QWidget, QMessageBox, QLabel, QMenu, QLineEdit
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import pyqtSignal, pyqtSlot, Qt
+from PyQt5.QtCore import pyqtSignal, pyqtSlot, Qt, QRect, QRectF
 from task_tree import TaskTree
 import json
 import os
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor, QFont, QPixmap
+from PyQt5.QtGui import QColor, QFont, QPixmap, QRegion, QPainterPath
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect, QGraphicsOpacityEffect
 
 class TaskManagerUI(QMainWindow):
@@ -133,6 +133,7 @@ class MiniModeWindow(QMainWindow):
         self.task_manager_ui = task_manager_ui
         self.config = self.load_config()
         self.initUI()
+        self.offset = None  # 添加这一行，初始化 offset 属性
 
         # 连接信号
         self.task_manager_ui.update_ui_signal.connect(self.update_task_name)
@@ -157,7 +158,7 @@ class MiniModeWindow(QMainWindow):
 
         # 设置样式
         self.setStyleSheet(f"""
-            background-color: {self.config["window"]["background_color"]};
+            background-color: {self.config["window"]["background"]["color"]};
             border-radius: {self.config["window"]["border_radius"]}px;
         """)
 
@@ -184,10 +185,25 @@ class MiniModeWindow(QMainWindow):
         central_widget = QWidget(self)
         central_widget.setLayout(layout)
         central_widget.setGraphicsEffect(shadow)
+        
+        # 应用背景样式
+        self.apply_background_style(central_widget)
         self.setCentralWidget(central_widget)
+
+        # 设置圆角遮罩
+        self.set_rounded_corners()
 
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
+
+    def set_rounded_corners(self):
+        """设置圆角遮罩"""
+        radius = self.config["window"]["border_radius"]
+        path = QPainterPath()
+        rect = QRectF(0, 0, self.width(), self.height())
+        path.addRoundedRect(rect, radius, radius)
+        region = QRegion(path.toFillPolygon().toPolygon())
+        self.setMask(region)
 
     def update_task_name(self):
         """更新任务名称并调整窗口宽度"""
@@ -196,12 +212,13 @@ class MiniModeWindow(QMainWindow):
         self.adjust_window_width()
 
     def adjust_window_width(self):
-        """根据标签内容调整窗口宽度"""
+        """根据标签内容自动调整窗口宽度"""
         # 获取文本的宽度
         text_width = self.label.fontMetrics().boundingRect(self.label.text()).width()
         # 设置窗口宽度，增加一些边距
         new_width = text_width + 40  # 40 是一个经验值，可以根据需要调整
         self.setFixedWidth(new_width)
+        self.set_rounded_corners()  # 更新圆角遮罩
 
     def show_context_menu(self, pos):
         context_menu = QMenu(self)
@@ -240,18 +257,23 @@ class MiniModeWindow(QMainWindow):
 
     def enter_rename_mode(self):
         """进入重命名模式"""
+        current_task_name = self.task_manager_ui.task_tree.current_task.name
         self.label.hide()
-        self.input_field.setText(self.task_manager_ui.task_tree.current_task.name)
+        self.input_field.setText(current_task_name)  # 使用当前任务名称
+        self.input_field.setGeometry(self.label.geometry())  # 设置输入框位置和大小
         self.input_field.show()
         self.input_field.setFocus()
+        self.input_field.selectAll()  # 选中所有文本方便编辑
 
     def rename_task(self):
         """重命名任务并调整窗口宽度"""
         new_name = self.input_field.text().strip()
         if new_name:
             self.task_manager_ui.task_tree.rename_task(new_name)
+            self.task_manager_ui.task_tree.save_to_file()  # 保存更改
             self.task_manager_ui.update_ui_signal.emit()
             self.task_manager_ui.task_changed_signal.emit()
+        
         self.input_field.hide()
         self.label.show()
         self.update_task_name()
@@ -259,8 +281,14 @@ class MiniModeWindow(QMainWindow):
     def load_config(self):
         default_config = {
             "window": {
-                "background_color": "#FFFFFF",
-                "background_image": "",
+                "background": {
+                    "type": "color",
+                    "color": "#FFFFFF",
+                    "image_path": "background.png",
+                    "size": "cover",
+                    "position": "center",
+                    "repeat": "no-repeat"
+                },
                 "border_radius": 15,
                 "resizable": True
             },
@@ -366,6 +394,60 @@ class MiniModeWindow(QMainWindow):
             self.move(window_geometry.x(), screen_geometry.bottom() - window_geometry.height())
         if window_geometry.right() > screen_geometry.right():
             self.move(screen_geometry.right() - window_geometry.width(), window_geometry.y())
+
+    def apply_background_style(self, widget):
+        """应用背景样式"""
+        background_config = self.config["window"]["background"]
+        style = f"border-radius: {self.config['window']['border_radius']}px;"
+        
+        if background_config["type"] == "color":
+            # 纯色背景
+            style += f"background-color: {background_config['color']};"
+        
+        elif background_config["type"] == "image":
+            # 图片背景
+            image_path = background_config["image_path"]
+            if os.path.exists(image_path):
+                style += f"""
+                    background-image: url({image_path});
+                    background-position: center;
+                    background-repeat: no-repeat;
+                    background-size: 100% 100%;  // 拉伸图片以填充窗口
+                """
+            else:
+                # 图片不存在时的后备样式
+                style += f"background-color: {self.config['window']['background']['color']};"
+                print("图片路径不存在，使用纯色背景。")
+        
+        widget.setStyleSheet(f"QWidget {{ {style} }}")
+        widget.update()  # 确保样式更新
+
+    def set_background_color(self, color):
+        """设置纯色背景"""
+        self.config["window"]["background"] = {
+            "type": "color",
+            "color": color
+        }
+        self.save_config()
+        self.apply_background_style(self.centralWidget())
+
+    def set_background_image(self, image_path, size='cover', position='center', repeat='no-repeat'):
+        """设置图片背景
+        Args:
+            image_path (str): 图片路径
+            size (str): 图片大小 (cover/contain/100% 100%/等)
+            position (str): 图片位置 (center/top/bottom/等)
+            repeat (str): 重复方式 (no-repeat/repeat/repeat-x/repeat-y)
+        """
+        self.config["window"]["background"] = {
+            "type": "image",
+            "image_path": image_path,
+            "size": size,
+            "position": position,
+            "repeat": repeat
+        }
+        self.save_config()
+        self.apply_background_style(self.centralWidget())
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
