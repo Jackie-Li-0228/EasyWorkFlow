@@ -1,8 +1,8 @@
 import sys
 import keyboard  # Import the keyboard library for global hotkeys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QVBoxLayout, QPushButton, QWidget, QMessageBox, QLabel, QMenu, QLineEdit
+from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QVBoxLayout, QPushButton, QWidget, QMessageBox, QLabel, QMenu, QLineEdit, QInputDialog
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import pyqtSignal, pyqtSlot, Qt, QRect, QRectF
+from PyQt5.QtCore import pyqtSignal, pyqtSlot, Qt, QRect, QRectF,QTimer
 from task_tree import TaskTree
 import json
 import os
@@ -57,6 +57,7 @@ class TaskManagerUI(QMainWindow):
         new_workflow_btn = QPushButton("创建一个新的工作流", self)
         new_workflow_btn.clicked.connect(self.create_new_workflow)
         
+        
         layout.addWidget(add_task_btn)
         layout.addWidget(complete_task_btn)
         layout.addWidget(mini_mode_btn)
@@ -66,9 +67,14 @@ class TaskManagerUI(QMainWindow):
 
     def setup_global_hotkeys(self):
         """设置全局快捷键"""
-        keyboard.add_hotkey('ctrl+shift+alt+l', self.add_task)
-        keyboard.add_hotkey('ctrl+shift+alt+k', self.rename_task)
-        keyboard.add_hotkey('ctrl+shift+alt+j', self.complete_task)
+        # 读取 hotkey.json 文件
+        with open('hotkey.json', 'r') as file:
+            hotkeys = json.load(file)
+
+        # 为每个函数设置对应的快捷键
+        for function_name, hotkey in hotkeys.items():
+            if hasattr(self, function_name):
+                keyboard.add_hotkey(hotkey, getattr(self, function_name))
 
     @pyqtSlot()
     def update_ui(self):
@@ -87,9 +93,10 @@ class TaskManagerUI(QMainWindow):
     def rename_task(self):
         """重命名当前任务"""
         if hasattr(self, 'mini_mode_window') and self.mini_mode_window.isVisible():
-            self.mini_mode_window.enter_rename_mode()
-        else:
-            new_name = "重命名任务"  # 这里可以弹出一个对话框获取用户输入
+            # self.mini_mode_window.enter_rename_mode()
+            QTimer.singleShot(0,self.mini_mode_window.enter_rename_mode)
+        else:# 默认操作
+            new_name = "重命名任务"  
             self.task_tree.rename_task(new_name)
             print(f"任务已重命名为 '{new_name}'。")
             self.update_ui_signal.emit()  # 触发 UI 更新
@@ -452,7 +459,11 @@ class MiniModeWindow(QMainWindow):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     task_tree = TaskTree()
+    TaskManager = TaskManagerUI(task_tree)
+    TaskManager.enter_mini_mode()
+
     # 直接启动 MiniModeWindow
-    mini_mode_window = MiniModeWindow(TaskManagerUI(task_tree))
-    mini_mode_window.show()
+
+    # mini_mode_window = MiniModeWindow(TaskManagerUI(task_tree))
+    # mini_mode_window.show()
     sys.exit(app.exec_())
