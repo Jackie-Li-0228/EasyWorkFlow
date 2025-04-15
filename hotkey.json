@@ -1,0 +1,5 @@
+{
+    "add_task": "ctrl+shift+alt+l",
+    "rename_task": "ctrl+shift+alt+k",
+    "complete_task": "ctrl+shift+alt+j"
+}
